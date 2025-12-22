@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { triggerEfficiencyAnalysis } from '../services/api'
+import { triggerEfficiencyAnalysis, getDiarizationStatus } from '../services/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -13,11 +13,18 @@ export default function TaggingPageNew() {
   const [taggingData, setTaggingData] = useState(null)
   const [speakerNames, setSpeakerNames] = useState({}) // SPEAKER_XX -> 이름 매핑
   const [transcript, setTranscript] = useState([]) // 개별 발화 수정 가능
-  const [view, setView] = useState('summary') // 'summary' or 'detail'
+  const [view, setView] = useState('summary') // 'summary' or 'diarization'
+  const [diarizationStatus, setDiarizationStatus] = useState(null)
 
   useEffect(() => {
     fetchTaggingData()
   }, [fileId])
+
+  useEffect(() => {
+    if (view === 'diarization') {
+      fetchDiarizationStatus()
+    }
+  }, [view, fileId])
 
   const fetchTaggingData = async () => {
     try {
@@ -41,6 +48,15 @@ export default function TaggingPageNew() {
     } catch (error) {
       console.error('태깅 데이터 조회 실패:', error)
       setLoading(false)
+    }
+  }
+
+  const fetchDiarizationStatus = async () => {
+    try {
+      const data = await getDiarizationStatus(fileId)
+      setDiarizationStatus(data)
+    } catch (error) {
+      console.error('분리 상태 조회 실패:', error)
     }
   }
 
@@ -111,17 +127,17 @@ export default function TaggingPageNew() {
                 : 'bg-bg-tertiary dark:bg-bg-tertiary-dark text-gray-700 dark:text-gray-300 hover:bg-bg-accent/20'
             }`}
           >
-            📊 요약 뷰 (일괄 매핑)
+            📊 요약
           </button>
           <button
-            onClick={() => setView('detail')}
+            onClick={() => setView('diarization')}
             className={`px-6 py-2 rounded-lg font-semibold transition-all ${
-              view === 'detail'
+              view === 'diarization'
                 ? 'bg-accent-blue text-white shadow-lg'
                 : 'bg-bg-tertiary dark:bg-bg-tertiary-dark text-gray-700 dark:text-gray-300 hover:bg-bg-accent/20'
             }`}
           >
-            📝 상세 뷰 (개별 수정)
+            🎯 분리 & 수정
           </button>
         </div>
 
@@ -212,37 +228,165 @@ export default function TaggingPageNew() {
             </div>
           </div>
         ) : (
-          // 상세 뷰: 전체 대본에서 개별 수정
-          <div className="bg-bg-tertiary dark:bg-bg-tertiary-dark rounded-xl shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-              📝 전체 대본 (개별 발화 수정 가능)
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-              💡 각 발화마다 화자를 선택할 수 있습니다. 대부분은 일괄 매핑으로 처리하고, 예외만 여기서 수정하세요.
-            </p>
+          // 분리 & 수정 뷰: 화자 분리 상태 시각화 + 이름 편집 + 세그먼트 개별 수정
+          <div className="space-y-6">
+            {/* 분리 품질 점수 */}
+            <div className="bg-bg-tertiary dark:bg-bg-tertiary-dark rounded-xl shadow-lg p-6 border border-bg-accent/30">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">📊 화자 분리 품질</h2>
 
-            <div className="space-y-3 max-h-[700px] overflow-y-auto">
-              {transcript.map((seg, idx) => (
-                <div key={idx} className="flex items-start gap-4 p-4 bg-bg-secondary dark:bg-bg-secondary-dark rounded-lg hover:bg-bg-accent/20 transition-colors">
-                  <div className="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    {Math.floor(seg.start_time)}초
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Alignment Score */}
+                <div className="text-center">
+                  <div className="text-5xl font-bold text-accent-blue dark:text-blue-300 mb-2">
+                    {diarizationStatus?.alignment_score?.toFixed(1) || '0'}%
                   </div>
-
-                  <select
-                    value={seg.speaker_label}
-                    onChange={(e) => handleSegmentSpeakerChange(idx, e.target.value)}
-                    className="flex-shrink-0 px-3 py-1 border border-bg-accent/30 bg-bg-tertiary dark:bg-bg-tertiary-dark text-gray-900 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-accent-blue"
-                  >
-                    {taggingData?.suggested_mappings.map((m) => (
-                      <option key={m.speaker_label} value={m.speaker_label}>
-                        {speakerNames[m.speaker_label] || m.speaker_label}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="flex-1 text-gray-700 dark:text-gray-200">{seg.text}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">매칭 정확도</div>
+                  <div className="mt-2 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-accent-blue"
+                      style={{ width: `${diarizationStatus?.alignment_score || 0}%` }}
+                    ></div>
+                  </div>
                 </div>
-              ))}
+
+                {/* Total Segments */}
+                <div className="text-center">
+                  <div className="text-5xl font-bold text-green-600 dark:text-green-400 mb-2">
+                    {diarizationStatus?.total_segments || 0}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">전체 세그먼트</div>
+                </div>
+
+                {/* Unknown Segments */}
+                <div className="text-center">
+                  <div className="text-5xl font-bold text-orange-600 dark:text-orange-400 mb-2">
+                    {diarizationStatus?.unknown_segments || 0}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">미할당 세그먼트</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                    ({diarizationStatus?.unassigned_duration?.toFixed(1) || '0'}초)
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 화자 이름 매핑 */}
+            <div className="bg-bg-tertiary dark:bg-bg-tertiary-dark rounded-xl shadow-lg p-6 border border-bg-accent/30">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">🎤 화자 이름 설정</h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {taggingData?.suggested_mappings.map((mapping) => (
+                  <div key={mapping.speaker_label} className="bg-bg-secondary dark:bg-bg-secondary-dark rounded-lg p-4 border border-bg-accent/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-gray-900 dark:text-white">{mapping.speaker_label}</span>
+                      {mapping.suggested_name && (
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 px-2 py-1 rounded-full">
+                          제안: {mapping.suggested_name}
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={speakerNames[mapping.speaker_label] || ''}
+                      onChange={(e) => handleBulkNameChange(mapping.speaker_label, e.target.value)}
+                      placeholder="이름 입력"
+                      className="w-full px-3 py-2 border border-bg-accent/30 bg-white dark:bg-bg-primary-dark text-gray-900 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-accent-blue focus:border-transparent"
+                    />
+                    {/* 빠른 선택 버튼 */}
+                    {taggingData?.detected_names && taggingData.detected_names.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {taggingData.detected_names.map((name, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleBulkNameChange(mapping.speaker_label, name)}
+                            className="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded text-xs transition-colors"
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 세그먼트 매칭 상태 & 개별 수정 */}
+            <div className="bg-bg-tertiary dark:bg-bg-tertiary-dark rounded-xl shadow-lg p-6 border border-bg-accent/30">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">📋 세그먼트 개별 수정 (최근 100개)</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                각 세그먼트의 화자를 개별적으로 수정할 수 있습니다. 색상은 신뢰도를 나타냅니다.
+              </p>
+
+              <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                {diarizationStatus?.merged_segments?.map((seg, idx) => {
+                  // 신뢰도에 따른 색상 구분
+                  const isUnknown = seg.speaker === 'UNKNOWN'
+                  const isLowConfidence = seg.confidence === 'low' || seg.confidence === 'medium'
+
+                  let bgColor, borderColor
+                  if (isUnknown) {
+                    bgColor = 'bg-red-50 dark:bg-red-900/20'
+                    borderColor = 'border-red-300 dark:border-red-700'
+                  } else if (isLowConfidence) {
+                    bgColor = 'bg-orange-50 dark:bg-orange-900/20'
+                    borderColor = 'border-orange-300 dark:border-orange-700'
+                  } else {
+                    bgColor = 'bg-green-50 dark:bg-green-900/20'
+                    borderColor = 'border-green-300 dark:border-green-700'
+                  }
+
+                  // 현재 화자의 표시 이름
+                  const displayName = speakerNames[seg.speaker] || seg.speaker
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg border ${bgColor} ${borderColor}`}
+                    >
+                      <div className="flex items-start gap-3 mb-2">
+                        <div className="flex-shrink-0">
+                          {/* 화자 선택 드롭다운 */}
+                          <select
+                            value={seg.speaker}
+                            onChange={(e) => {
+                              // merged_segments를 수정하도록 처리
+                              const updatedSegments = [...diarizationStatus.merged_segments]
+                              updatedSegments[idx].speaker = e.target.value
+                              setDiarizationStatus({ ...diarizationStatus, merged_segments: updatedSegments })
+                            }}
+                            className="px-3 py-1 border border-bg-accent/30 bg-white dark:bg-bg-primary-dark text-gray-900 dark:text-white rounded text-xs font-semibold focus:ring-2 focus:ring-accent-blue"
+                          >
+                            {taggingData?.suggested_mappings.map((mapping) => (
+                              <option key={mapping.speaker_label} value={mapping.speaker_label}>
+                                {speakerNames[mapping.speaker_label] || mapping.speaker_label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {seg.start.toFixed(1)}s - {seg.end.toFixed(1)}s
+                            </span>
+                            {seg.confidence && (
+                              <span className={`text-xs px-2 py-0.5 rounded ${
+                                seg.confidence === 'high' ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200' :
+                                seg.confidence === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-200' :
+                                'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200'
+                              }`}>
+                                신뢰도: {seg.confidence === 'high' ? '높음' : seg.confidence === 'medium' ? '보통' : '낮음'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-700 dark:text-gray-300">{seg.text}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
         )}

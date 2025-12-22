@@ -8,7 +8,6 @@ const FileUpload = ({ onUploadSuccess }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState(null);
   const [whisperMode, setWhisperMode] = useState('local'); // 'local' or 'api'
-  const [diarizationMode, setDiarizationMode] = useState('senko'); // 'senko' or 'nemo'
   const fileInputRef = useRef(null);
 
   const handleDragEnter = (e) => {
@@ -85,14 +84,12 @@ const FileUpload = ({ onUploadSuccess }) => {
       // 업로드 성공 - 모드 정보 포함
       console.log('FileUpload - Upload success');
       console.log('FileUpload - whisperMode:', whisperMode);
-      console.log('FileUpload - diarizationMode:', diarizationMode);
       console.log('FileUpload - result:', result);
 
       if (onUploadSuccess) {
         const uploadData = {
           ...result,
-          whisperMode,
-          diarizationMode
+          whisperMode
         };
         console.log('FileUpload - Calling onUploadSuccess with:', uploadData);
         onUploadSuccess(uploadData);
@@ -205,38 +202,16 @@ const FileUpload = ({ onUploadSuccess }) => {
 
           {/* 모델 선택 옵션 */}
           <div className="space-y-6 mb-6">
-            {/* 화자 분리 모델 선택 */}
+            {/* 화자 분리 모델 정보 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                 🎙️ 화자 분리 모델
               </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setDiarizationMode('senko')}
-                  className={`p-4 rounded-lg border-2 transition-all ${
-                    diarizationMode === 'senko'
-                      ? 'border-accent-blue bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-bg-accent/30 hover:border-accent-blue'
-                  }`}
-                >
-                  <div className="text-left">
-                    <div className="font-semibold text-gray-900 dark:text-white">Senko</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">⚡ 빠름, 간단</div>
-                  </div>
-                </button>
-                <button
-                  onClick={() => setDiarizationMode('nemo')}
-                  className={`p-4 rounded-lg border-2 transition-all ${
-                    diarizationMode === 'nemo'
-                      ? 'border-accent-blue bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-bg-accent/30 hover:border-accent-blue'
-                  }`}
-                >
-                  <div className="text-left">
-                    <div className="font-semibold text-gray-900 dark:text-white">NeMo</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">🎯 정확, 세밀</div>
-                  </div>
-                </button>
+              <div className="p-4 rounded-lg border-2 border-accent-blue bg-blue-50 dark:bg-blue-900/20">
+                <div className="text-left">
+                  <div className="font-semibold text-gray-900 dark:text-white">Pyannote 3.1</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">🎯 최신 고성능 화자 분리</div>
+                </div>
               </div>
             </div>
 

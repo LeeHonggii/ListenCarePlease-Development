@@ -65,18 +65,16 @@ def stt(input, output, model, device):
 @cli.command()
 @click.option('--input', '-i', required=True, type=click.Path(exists=True), help='입력 오디오 파일 (WAV)')
 @click.option('--output', '-o', required=True, type=click.Path(), help='출력 JSON 파일')
-@click.option('--model', '-m', default='senko', type=click.Choice(['senko', 'nemo']), help='화자 분리 모델')
 @click.option('--device', '-d', default='cpu', help='디바이스 (cpu/cuda)')
-def diarize(input, output, model, device):
-    """화자 분리 - 오디오에서 화자별 구간 감지"""
+def diarize(input, output, device):
+    """화자 분리 - 오디오에서 화자별 구간 감지 (Pyannote)"""
     click.echo(f"🎤 Diarization 시작: {input}")
-    click.echo(f"모델: {model}, 디바이스: {device}")
+    click.echo(f"모델: Pyannote 3.1, 디바이스: {device}")
 
     try:
         result = run_diarization(
             audio_path=Path(input),
-            device=device,
-            mode=model
+            device=device
         )
 
         # JSON 저장
@@ -242,8 +240,7 @@ def pipeline(input, participants, meeting_type, output_dir):
         click.echo("\n[2/6] 화자 분리 실행 중...")
         diarization_result = run_diarization(
             audio_path=input_path,
-            device='cpu',
-            mode='senko'
+            device='cpu'
         )
         diarization_path = output_path / f"{base_name}_diarization.json"
         with open(diarization_path, 'w', encoding='utf-8') as f:

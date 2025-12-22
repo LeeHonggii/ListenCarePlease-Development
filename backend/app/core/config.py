@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     WHISPER_MODEL_SIZE: str = "large-v3"  # tiny, base, small, medium, large, large-v3
     WHISPER_DEVICE: str = "cpu"  # cpu or cuda
 
-    # Diarization Settings
-    DIARIZATION_MODE: str = "nemo"  # "senko" (fast) or "nemo" (accurate)
+    # Diarization Settings (Pyannote)
+    HUGGINGFACE_TOKEN: Optional[str] = None  # HuggingFace 토큰 (Pyannote 모델용)
 
     class Config:
         env_file = ".env"

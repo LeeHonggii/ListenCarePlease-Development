@@ -39,7 +39,6 @@ def process_audio_pipeline(
     file_id: str,
     user_id: int,
     whisper_mode: str = "local",
-    diarization_mode: str = "senko",
     skip_stt: bool = False
 ):
     """
@@ -49,7 +48,6 @@ def process_audio_pipeline(
         file_id: 파일 ID
         user_id: 사용자 ID
         whisper_mode: Whisper 모드 ("local" 또는 "api")
-        diarization_mode: 화자 분리 모델 ("senko" 또는 "nemo")
     """
     # 백그라운드 태스크용 새 DB 세션 생성
     from app.db.base import SessionLocal
@@ -223,17 +221,15 @@ def process_audio_pipeline(
         # --- [Keyword Extraction End] ---
 
         # 4) Diarization (화자 분리)
-        diarization_method = "Senko" if diarization_mode == "senko" else "NeMo"
-
         # 상태 업데이트: Diarization 시작
         audio_file.processing_step = "diarization"
         audio_file.processing_progress = 70
-        audio_file.processing_message = f"화자 분리 중... ({diarization_method})"
+        audio_file.processing_message = "화자 분리 중... (Pyannote)"
         db.commit()
 
         PROCESSING_STATUS[file_id] = {
             "status": "diarization",
-            "step": f"화자 분리 중... ({diarization_method})",
+            "step": "화자 분리 중... (Pyannote)",
             "progress": 70,
         }
 
@@ -251,7 +247,6 @@ def process_audio_pipeline(
             diarization_result = run_diarization(
                 preprocessed_path,
                 device=device,
-                mode=diarization_mode,
                 num_speakers=confirmed_speaker_count
             )
 
@@ -639,7 +634,6 @@ async def start_processing(
     file_id: str,
     background_tasks: BackgroundTasks,
     whisper_mode: str = None,  # "local" or "api" (None일 경우 설정값 사용)
-    diarization_mode: str = None,  # "senko" or "nemo" (None일 경우 설정값 사용)
     db: Session = Depends(get_db),
     current_user: Any = Depends(get_current_user)
 ):
@@ -649,7 +643,6 @@ async def start_processing(
     Args:
         file_id: 업로드된 파일 ID (UUID 또는 DB ID)
         whisper_mode: Whisper 모드 ("local" 또는 "api", 기본값: 설정값)
-        diarization_mode: 화자 분리 모델 ("senko" 또는 "nemo", 기본값: 설정값)
 
     Returns:
         처리 시작 확인 메시지
@@ -657,8 +650,7 @@ async def start_processing(
     Note:
         - model_size: large-v3 고정
         - device: 자동 감지 (CUDA > MPS > CPU)
-        - senko: 빠름, 간단
-        - nemo: 정확, 세밀한 설정
+        - diarization: Pyannote speaker-diarization-3.1
     """
     import re
 
@@ -680,15 +672,10 @@ async def start_processing(
 
     # 설정값 또는 파라미터 사용
     use_whisper_mode = whisper_mode if whisper_mode else settings.WHISPER_MODE
-    use_diarization_mode = diarization_mode if diarization_mode else settings.DIARIZATION_MODE
 
     # Whisper 모드 검증
     if use_whisper_mode not in ["local", "api"]:
         raise HTTPException(status_code=400, detail="whisper_mode는 'local' 또는 'api'여야 합니다.")
-
-    # Diarization 모드 검증
-    if use_diarization_mode not in ["senko", "nemo"]:
-        raise HTTPException(status_code=400, detail="diarization_mode는 'senko' 또는 'nemo'여야 합니다.")
 
     # API 모드일 때 API 키 확인
     if use_whisper_mode == "api" and not settings.OPENAI_API_KEY:
@@ -714,7 +701,7 @@ async def start_processing(
         "step": "대기 중...",
         "progress": 0,
         "whisper_mode": use_whisper_mode,
-        "diarization_mode": use_diarization_mode,
+        "diarization": "pyannote",
         "model_size": "large-v3",
         "device": detected_device,
     }
@@ -724,8 +711,7 @@ async def start_processing(
         process_audio_pipeline,
         actual_file_id,
         current_user.id,
-        use_whisper_mode,
-        use_diarization_mode
+        use_whisper_mode
     )
 
     return {
@@ -733,7 +719,7 @@ async def start_processing(
         "message": "처리가 시작되었습니다.",
         "status": "queued",
         "whisper_mode": use_whisper_mode,
-        "diarization_mode": use_diarization_mode,
+        "diarization": "pyannote",
         "model_size": "large-v3",
         "device": detected_device,
     }

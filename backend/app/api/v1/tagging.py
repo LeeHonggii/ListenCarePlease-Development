@@ -162,12 +162,11 @@ async def confirm_speaker_info(
                 file_id=file_id,
                 user_id=audio_file.user_id, # Pass user_id
                 whisper_mode="local", # 기본값 사용
-                diarization_mode="nemo", # NeMo 강제 (화자 수 지정은 NeMo만 지원)
                 skip_stt=True # STT 건너뛰기
             )
-            
+
             return {
-                "message": f"화자 정보가 저장되었으며, {speaker_count}명으로 재분석을 시작합니다. (STT 생략)",
+                "message": f"화자 정보가 저장되었으며, Pyannote로 재분석을 시작합니다. (STT 생략)",
                 "status": "reprocessing_started"
             }
 
@@ -217,30 +216,47 @@ async def get_tagging_suggestion(file_id: str, db: Session = Depends(get_db)):
         DiarizationResult.audio_file_id == audio_file.id
     ).order_by(DiarizationResult.start_time).all()
 
-    # STT와 Diarization 병합
-    merged_segments = []
-    for stt in stt_results:
-        speaker_label = "UNKNOWN"
-        for diar in diar_results:
-            if diar.start_time <= stt.start_time < diar.end_time:
-                speaker_label = diar.speaker_label
-                break
+    # STT와 Diarization 병합 (정교한 로직 사용)
+    from app.services.diarization import merge_stt_with_diarization
 
-        merged_segments.append({
-            "speaker": speaker_label,
+    # STT 세그먼트 형식 변환
+    stt_segments = [
+        {
+            "text": stt.text,
             "start": stt.start_time,
-            "end": stt.end_time,
-            "text": stt.text
-        })
+            "end": stt.end_time
+        }
+        for stt in stt_results
+    ]
+
+    # Diarization 결과 형식 변환
+    diarization_result = {
+        "turns": [
+            {
+                "speaker_label": diar.speaker_label,
+                "start": diar.start_time,
+                "end": diar.end_time
+            }
+            for diar in diar_results
+        ],
+        "embeddings": {}  # 임베딩은 병합에 사용되지 않음
+    }
+
+    # 정교한 병합 로직 사용 (Gap Filling, 최대 겹침 화자 선택 등)
+    merge_response = merge_stt_with_diarization(stt_segments, diarization_result)
+    merged_segments = merge_response.get("merged_result", [])
 
     # SpeakerMapping에서 Agent가 제안한 이름 가져오기
     speaker_mappings = db.query(SpeakerMapping).filter(
         SpeakerMapping.audio_file_id == audio_file.id
     ).all()
 
-    # suggested_mappings 구성 (기존 final_name도 포함)
+    # suggested_mappings 구성 (기존 final_name도 포함, UNKNOWN 제외)
     suggested_mappings = []
     for sm in speaker_mappings:
+        # UNKNOWN 화자는 제외
+        if sm.speaker_label == "UNKNOWN":
+            continue
         suggested_mappings.append(
             SuggestedMapping(
                 speaker_label=sm.speaker_label,
@@ -441,8 +457,16 @@ async def run_tagging_agent(file_id: str, audio_file_id: int, user_id: int):
                 )
                 db.add(speaker_mapping)
 
-        db.commit()
-        print(f"✅ Agent 실행 완료: audio_file_id={audio_file_id}, 매핑 {len(final_mappings)}개 저장")
+        try:
+            db.commit()
+            print(f"✅ Agent 실행 완료: audio_file_id={audio_file_id}, 매핑 {len(final_mappings)}개 저장")
+        except Exception as commit_error:
+            # StaleDataError: 재분석으로 인해 레코드가 삭제된 경우
+            if "StaleDataError" in str(type(commit_error).__name__):
+                print(f"⚠️ Agent 결과 저장 실패 (재분석 진행 중): {commit_error}")
+                db.rollback()
+            else:
+                raise
 
     except Exception as e:
         print(f"⚠️ Agent 실행 실패: {e}")
@@ -557,13 +581,39 @@ async def confirm_tagging(
     ).all()
     mappings = {sm.speaker_label: sm.final_name for sm in speaker_mappings if sm.final_name}
 
+    # FinalTranscript 생성 (정교한 병합 로직 사용)
+    from app.services.diarization import merge_stt_with_diarization
+
+    # STT 세그먼트 형식 변환
+    stt_segments = [
+        {
+            "text": stt.text,
+            "start": stt.start_time,
+            "end": stt.end_time
+        }
+        for stt in stt_results
+    ]
+
+    # Diarization 결과 형식 변환
+    diarization_result = {
+        "turns": [
+            {
+                "speaker_label": diar.speaker_label,
+                "start": diar.start_time,
+                "end": diar.end_time
+            }
+            for diar in diar_results
+        ],
+        "embeddings": {}  # 임베딩은 병합에 사용되지 않음
+    }
+
+    # 정교한 병합 로직 사용
+    merge_response = merge_stt_with_diarization(stt_segments, diarization_result)
+    merged_segments = merge_response.get("merged_result", [])
+
     # FinalTranscript 생성
-    for idx, stt in enumerate(stt_results):
-        speaker_label = "UNKNOWN"
-        for diar in diar_results:
-            if diar.start_time <= stt.start_time < diar.end_time:
-                speaker_label = diar.speaker_label
-                break
+    for idx, segment in enumerate(merged_segments):
+        speaker_label = segment.get("speaker", "UNKNOWN")
 
         # final_name 매핑 적용 (없으면 speaker_label 사용)
         speaker_name = mappings.get(speaker_label, speaker_label)
@@ -572,9 +622,9 @@ async def confirm_tagging(
             audio_file_id=audio_file.id,
             segment_index=idx,
             speaker_name=speaker_name,
-            start_time=stt.start_time,
-            end_time=stt.end_time,
-            text=stt.text
+            start_time=segment.get("start", 0.0),
+            end_time=segment.get("end", 0.0),
+            text=segment.get("text", "")
         )
         db.add(final_transcript)
 
@@ -691,6 +741,92 @@ async def confirm_tagging(
     )
 
 
+@router.get("/{file_id}/diarization-status")
+async def get_diarization_status(file_id: str, db: Session = Depends(get_db)):
+    """
+    화자 분리 상태 조회 - alignment_score와 세그먼트별 매칭 상태
+    """
+    # AudioFile 찾기
+    audio_file = None
+    if file_id.isdigit():
+        audio_file = db.query(AudioFile).filter(AudioFile.id == int(file_id)).first()
+    if not audio_file:
+        audio_file = db.query(AudioFile).filter(
+            (AudioFile.file_path.like(f"%{file_id}%")) |
+            (AudioFile.original_filename.like(f"%{file_id}%"))
+        ).first()
+
+    if not audio_file:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+
+    # STT 결과 조회
+    stt_results = db.query(STTResult).filter(
+        STTResult.audio_file_id == audio_file.id
+    ).order_by(STTResult.start_time).all()
+
+    # Diarization 결과 조회
+    diar_results = db.query(DiarizationResult).filter(
+        DiarizationResult.audio_file_id == audio_file.id
+    ).order_by(DiarizationResult.start_time).all()
+
+    # STT와 Diarization 병합 (정교한 로직 사용)
+    from app.services.diarization import merge_stt_with_diarization
+
+    # STT 세그먼트 형식 변환
+    stt_segments = [
+        {
+            "text": stt.text,
+            "start": stt.start_time,
+            "end": stt.end_time
+        }
+        for stt in stt_results
+    ]
+
+    # Diarization 결과 형식 변환
+    diarization_result = {
+        "turns": [
+            {
+                "speaker_label": diar.speaker_label,
+                "start": diar.start_time,
+                "end": diar.end_time
+            }
+            for diar in diar_results
+        ],
+        "embeddings": {}  # 임베딩은 병합에 사용되지 않음
+    }
+
+    # 정교한 병합 로직 사용
+    merge_response = merge_stt_with_diarization(stt_segments, diarization_result)
+    merged_segments = merge_response.get("merged_result", [])
+    alignment_score = merge_response.get("alignment_score", 0.0)
+    unassigned_duration = merge_response.get("unassigned_duration", 0.0)
+
+    # 화자별 통계
+    speaker_stats = {}
+    unknown_count = 0
+    for segment in merged_segments:
+        speaker = segment.get("speaker", "UNKNOWN")
+        if speaker == "UNKNOWN":
+            unknown_count += 1
+        else:
+            if speaker not in speaker_stats:
+                speaker_stats[speaker] = {"count": 0, "duration": 0.0}
+            speaker_stats[speaker]["count"] += 1
+            speaker_stats[speaker]["duration"] += segment.get("end", 0) - segment.get("start", 0)
+
+    return {
+        "file_id": file_id,
+        "audio_file_id": audio_file.id,
+        "alignment_score": alignment_score,
+        "unassigned_duration": unassigned_duration,
+        "total_segments": len(merged_segments),
+        "unknown_segments": unknown_count,
+        "speaker_stats": speaker_stats,
+        "diarization_turns": diarization_result["turns"],
+        "merged_segments": merged_segments[:100]  # 첫 100개만 (시각화용)
+    }
+
+
 @router.get("/{file_id}/result")
 async def get_tagging_result(file_id: str, db: Session = Depends(get_db)):
     """
@@ -735,24 +871,48 @@ async def get_tagging_result(file_id: str, db: Session = Depends(get_db)):
         DiarizationResult.audio_file_id == audio_file.id
     ).order_by(DiarizationResult.start_time).all()
 
-    # STT와 Diarization 병합하여 최종 대본 생성
-    final_transcript = []
-    for stt in stt_results:
-        speaker_label = "UNKNOWN"
-        for diar in diar_results:
-            if diar.start_time <= stt.start_time < diar.end_time:
-                speaker_label = diar.speaker_label
-                break
+    # STT와 Diarization 병합하여 최종 대본 생성 (정교한 로직 사용)
+    from app.services.diarization import merge_stt_with_diarization
 
-        # final_name 매핑 적용
+    # STT 세그먼트 형식 변환
+    stt_segments = [
+        {
+            "text": stt.text,
+            "start": stt.start_time,
+            "end": stt.end_time
+        }
+        for stt in stt_results
+    ]
+
+    # Diarization 결과 형식 변환
+    diarization_result = {
+        "turns": [
+            {
+                "speaker_label": diar.speaker_label,
+                "start": diar.start_time,
+                "end": diar.end_time
+            }
+            for diar in diar_results
+        ],
+        "embeddings": {}  # 임베딩은 병합에 사용되지 않음
+    }
+
+    # 정교한 병합 로직 사용
+    merge_response = merge_stt_with_diarization(stt_segments, diarization_result)
+    merged_segments = merge_response.get("merged_result", [])
+
+    # final_name 매핑 적용
+    final_transcript = []
+    for segment in merged_segments:
+        speaker_label = segment.get("speaker", "UNKNOWN")
         speaker_name = mappings.get(speaker_label, "Unknown")
 
         final_transcript.append({
             "speaker_name": speaker_name,
             "speaker_label": speaker_label,
-            "start_time": stt.start_time,
-            "end_time": stt.end_time,
-            "text": stt.text
+            "start_time": segment.get("start", 0.0),
+            "end_time": segment.get("end", 0.0),
+            "text": segment.get("text", "")
         })
 
     return {

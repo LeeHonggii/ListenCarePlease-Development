@@ -16,7 +16,7 @@ class SafeGlobalsContext:
 
 def apply_patch():
     if not hasattr(torch.serialization, "safe_globals"):
-        logger.warning("⚠️ Patching torch.serialization.safe_globals for Senko compatibility")
+        logger.warning("⚠️ Patching torch.serialization.safe_globals for model compatibility")
         torch.serialization.safe_globals = SafeGlobalsContext
     else:
         logger.info("✅ torch.serialization.safe_globals already exists")

@@ -13,14 +13,12 @@ const ProcessingPage = () => {
 
   // 네비게이션 state에서 모드 정보 가져오기
   const whisperMode = location.state?.whisperMode || 'local';
-  const diarizationMode = location.state?.diarizationMode || 'senko';
 
   // 디버깅용 로그
   useEffect(() => {
     console.log('ProcessingPage - Location state:', location.state);
     console.log('ProcessingPage - whisperMode:', whisperMode);
-    console.log('ProcessingPage - diarizationMode:', diarizationMode);
-  }, [location.state, whisperMode, diarizationMode]);
+  }, [location.state, whisperMode]);
 
   useEffect(() => {
     // 이미 처리가 시작되었으면 중복 실행 방지
@@ -39,7 +37,7 @@ const ProcessingPage = () => {
         // 이미 처리 중이거나 완료된 경우는 startProcessing 호출 안 함
         if (!currentStatus || currentStatus.status === 'uploaded' || currentStatus.status === 'failed') {
           // 백엔드 처리 시작
-          await startProcessing(fileId, whisperMode, diarizationMode);
+          await startProcessing(fileId, whisperMode);
         }
 
         // 상태 폴링 시작 (2초마다)
@@ -106,7 +104,7 @@ const ProcessingPage = () => {
         clearInterval(pollingInterval);
       }
     };
-  }, [fileId, navigate, whisperMode, diarizationMode]);
+  }, [fileId, navigate, whisperMode]);
 
   return (
     <div className="p-8 flex items-center justify-center min-h-[calc(100vh-4rem)]">
@@ -157,7 +155,7 @@ const ProcessingPage = () => {
                 <div>
                   <span className="text-gray-700 dark:text-gray-300 font-medium">🎙️ 화자 분리:</span>
                   <span className="ml-2 text-gray-900 dark:text-white">
-                    {diarizationMode === 'senko' ? 'Senko (빠름)' : 'NeMo (정확)'}
+                    Pyannote 3.1
                   </span>
                 </div>
                 <div>

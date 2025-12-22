@@ -58,10 +58,9 @@ export const deleteFile = async (fileId) => {
 };
 
 // 파일 처리 시작
-export const startProcessing = async (fileId, whisperMode, diarizationMode) => {
+export const startProcessing = async (fileId, whisperMode) => {
   const params = new URLSearchParams();
   if (whisperMode) params.append('whisper_mode', whisperMode);
-  if (diarizationMode) params.append('diarization_mode', diarizationMode);
 
   const response = await api.post(`/api/v1/process/${fileId}?${params.toString()}`);
   return response.data;
@@ -126,6 +125,12 @@ export const confirmTagging = async (fileId, mappings) => {
 // 태깅 결과 조회
 export const getTaggingResult = async (fileId) => {
   const response = await api.get(`/api/v1/tagging/${fileId}/result`);
+  return response.data;
+};
+
+// 화자 분리 상태 조회
+export const getDiarizationStatus = async (fileId) => {
+  const response = await api.get(`/api/v1/tagging/${fileId}/diarization-status`);
   return response.data;
 };
 

@@ -17,7 +17,7 @@ class SpeakerProfile(Base):
     speaker_name = Column(String(100), nullable=False)  # 화자 실명 (예: "김민서")
 
     # 음성 임베딩 (평균 벡터)
-    voice_embedding = Column(JSON, nullable=True)  # [0.12, -0.45, ...] (192차원 Senko 임베딩)
+    voice_embedding = Column(JSON, nullable=True)  # [0.12, -0.45, ...] (512차원 Pyannote 임베딩)
 
     # 텍스트 임베딩 (발화 스타일)
     text_embedding = Column(JSON, nullable=True)  # [0.11, -0.44, ...] (OpenAI text-embedding-3-small)

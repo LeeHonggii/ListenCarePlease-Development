@@ -75,44 +75,39 @@ RUN echo "Installing Mecab and mecab-ko-dic..." && \
     rm -rf /tmp/mecab* && \
     echo "Mecab installation complete"
 
-# Senko 설치 (화자 분리 모델 1) - NVIDIA GPU 지원
-RUN echo "Installing Senko with NVIDIA support..." && \
-    pip install --no-cache-dir "git+https://github.com/narcotic-sh/senko.git#egg=senko[nvidia]"
+# Pyannote 모델 사전 다운로드는 런타임에 수행
+# (HuggingFace 토큰이 환경변수로 필요)
 
-# NeMo 설치 (화자 분리 모델 2) - GPU 전용
-# 주의: NeMo는 용량이 크므로 (~3GB) 필요 시에만 활성화
-RUN echo "Installing NeMo Toolkit with ASR support..." && \
-    pip install --no-cache-dir nemo-toolkit[asr]==2.0.0rc0 && \
-    echo "Downgrading huggingface-hub to 0.23.2 for compatibility..." && \
-    pip install --no-cache-dir --force-reinstall huggingface-hub==0.23.2
-
-# CUDA 라이브러리 심볼릭 링크 생성 (동적 탐색 & 전역 링크)
-RUN echo "Creating CUDA library symlinks..." && \
+# CUDA 라이브러리 경로 설정 (조건부)
+RUN echo "Checking for CUDA libraries..." && \
     SITE_PACKAGES="/usr/local/lib/python3.11/site-packages" && \
-    # libnvrtc 찾기 (builtins 제외)
-    NVRTC_PATH=$(find $SITE_PACKAGES -name "libnvrtc*.so.1*" ! -name "*builtins*" -print -quit) && \
-    if [ -n "$NVRTC_PATH" ]; then \
-    echo "Found NVRTC at $NVRTC_PATH"; \
-    ln -sf "$NVRTC_PATH" /usr/lib/libnvrtc.so; \
-    ln -sf "$NVRTC_PATH" /usr/lib/libnvrtc.so.11.2; \
-    ln -sf "$NVRTC_PATH" /usr/lib/libnvrtc.so.12; \
+    if [ -d "$SITE_PACKAGES" ]; then \
+        # libnvrtc 찾기 (builtins 제외)
+        NVRTC_PATH=$(find $SITE_PACKAGES -name "libnvrtc*.so.1*" ! -name "*builtins*" -print -quit 2>/dev/null || echo "") && \
+        if [ -n "$NVRTC_PATH" ]; then \
+            echo "Found NVRTC at $NVRTC_PATH"; \
+            ln -sf "$NVRTC_PATH" /usr/lib/libnvrtc.so; \
+            ln -sf "$NVRTC_PATH" /usr/lib/libnvrtc.so.11.2; \
+            ln -sf "$NVRTC_PATH" /usr/lib/libnvrtc.so.12; \
+        else \
+            echo "NVRTC not found (may not be needed for Pyannote)"; \
+        fi && \
+        # builtins 찾기
+        BUILTIN_PATH=$(find $SITE_PACKAGES -name "libnvrtc-builtins.so*" -print -quit 2>/dev/null || echo "") && \
+        if [ -n "$BUILTIN_PATH" ]; then \
+            echo "Found Builtins at $BUILTIN_PATH"; \
+            ln -sf "$BUILTIN_PATH" /usr/lib/libnvrtc-builtins.so; \
+            BUILTIN_NAME=$(basename "$BUILTIN_PATH"); \
+            ln -sf "$BUILTIN_PATH" "/usr/lib/$BUILTIN_NAME"; \
+        else \
+            echo "NVRTC builtins not found (may not be needed for Pyannote)"; \
+        fi; \
     else \
-    echo "WARNING: libnvrtc not found"; \
-    fi && \
-    # builtins 찾기
-    BUILTIN_PATH=$(find $SITE_PACKAGES -name "libnvrtc-builtins.so*" -print -quit) && \
-    if [ -n "$BUILTIN_PATH" ]; then \
-    echo "Found Builtins at $BUILTIN_PATH"; \
-    ln -sf "$BUILTIN_PATH" /usr/lib/libnvrtc-builtins.so; \
-    # Link specific version name (e.g., libnvrtc-builtins.so.12.1)
-    BUILTIN_NAME=$(basename "$BUILTIN_PATH"); \
-    ln -sf "$BUILTIN_PATH" "/usr/lib/$BUILTIN_NAME"; \
-    else \
-    echo "WARNING: libnvrtc-builtins not found"; \
+        echo "Site-packages directory not found yet, skipping CUDA symlinks"; \
     fi
 
-# Add NVIDIA library paths to LD_LIBRARY_PATH
-ENV LD_LIBRARY_PATH="/usr/local/lib/python3.11/site-packages/nvidia/cuda_nvrtc/lib:/usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+# Add NVIDIA library paths to LD_LIBRARY_PATH (조건부)
+ENV LD_LIBRARY_PATH="/usr/local/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH"
 
 # Whisper 모델 미리 다운로드 (large-v3, 약 3GB)
 # 다운로드만 하고 로드는 하지 않음 (메모리 절약)
@@ -146,9 +141,6 @@ RUN mkdir -p /app/templates
 
 # 업로드 디렉토리 및 모델 캐시 디렉토리 생성
 RUN mkdir -p /app/uploads /app/temp /app/.cache
-
-# PyTorch 번들 라이브러리 경로 설정 (cuDNN 등)
-ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
 
 # 포트 노출
 EXPOSE 8000

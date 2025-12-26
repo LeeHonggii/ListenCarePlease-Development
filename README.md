@@ -170,6 +170,7 @@ docker exec -it listencare_backend alembic upgrade head
 
 - `main`: Development 저장소의 메인 브랜치
 - `honggi`: 현재 개발 진행 중인 브랜치
+- `jihoon`: 정지훈이 현재 개발 진행 중인 브랜치
 - feature 브랜치: 개별 기능 개발용
 
 ---
